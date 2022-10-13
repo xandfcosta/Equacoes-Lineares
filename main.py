@@ -1,5 +1,7 @@
 import copy
 from decimal import *
+import concurrent.futures
+from unicodedata import decimal
 
 MAX_FILES = 13
 
@@ -101,13 +103,17 @@ def gauss_jordan( mat, m ):
 # ============
 
 def equaciona( mat, x, pos_linha, m ):
-    soma = 0
+    # Inicialização pra usar a biblioteca Decimal
+    getcontext( )
+    getcontext( ).prec = 50 # Precisão
+    
+    soma = Decimal( 0 )
         
     for i in range( m ):        
         if i != pos_linha:
-            soma += mat[ pos_linha ][ i ] * x[ i ] # Faz a somatória dos outros x direto em uma variável
+            soma = Decimal( soma ) + Decimal( mat[ pos_linha ][ i ] ) * Decimal( x[ i ] ) # Faz a somatória dos outros x direto em uma variável
             
-    return ( mat[ pos_linha ][ m ] - soma ) / mat[ pos_linha ][ pos_linha ] # b - ( tudo menos o x atual ) / x
+    return (  Decimal( mat[ pos_linha ][ m ] ) - Decimal( soma ) ) / Decimal( mat[ pos_linha ][ pos_linha ] ) # b - ( tudo menos o x atual ) / x
 
 def criterio_sassenfeld( mat, m ):
     # Vetor para empregar os Xi já obtidos
@@ -150,6 +156,10 @@ def gauss_seidel( mat, m, k, e ):
         if mat[ i ][ i ] == 0:
             return criterio, "SI"
     
+    # Inicialização pra usar a biblioteca Decimal
+    getcontext( )
+    getcontext( ).prec = 50 # Precisão
+    
     # Iterações
     for i in range( k ): # K
         print( f"k = {i + 1}" )
@@ -158,7 +168,7 @@ def gauss_seidel( mat, m, k, e ):
         for j in range( m ): # X   
             x = equaciona( mat, x_list, j, m )
             x_list[ j ] = x
-            diferenca = abs( x - x_ant[ j ] )
+            diferenca = abs( Decimal( x ) - Decimal( x_ant[ j ] ) )
             
             print( f"x{j + 1} = {x} | {diferenca} < e = {e} ", end="" ) 
             
@@ -173,36 +183,37 @@ def gauss_seidel( mat, m, k, e ):
         # Se todos X são válidos
         if cont == 0:
             # Retorna os valores com o critério
-            return criterio, x_list
+            return criterio, [ float( num ) for num in x_list ]
         else:
             # Senão copia os valores de X para o vetor de anterior e continua o processo
             x_ant = copy.deepcopy( x_list )
 
     # Caso tenha estourado o K retorna o que tiver
-    return criterio, x_list
+    return criterio, [ float( num ) for num in x_list ]
 
 def main():    
-    k = 1000
-    e = 0.001
+    k = 100
+    e = 0.1
     
     for i in range( MAX_FILES ):
         print( f"[!] Arquivo {i}" )
         
         mat, n = ler_arquivo( f"inputs/{i}.txt" )
-        
+               
         mat_res, s = gauss_jordan( copy.deepcopy( mat ), n )
         
         print( "GAUSS-JORDAN" )
         mostra_matriz( mat_res )
         print( f"S = {s}\n" )
         
-        print( "="*50 )
+        print( "-"*200, "\n" )
         
         print( "GAUSS-SEIDEL" )
         criterio, s = gauss_seidel( copy.copy( mat ), n, k, e )  
         print( f"[!] Criterio: {criterio}" )      
         print( f"S = {s}\n" )
 
+        print( "="*200, "\n" )
           
 if __name__ == '__main__':
     main()
