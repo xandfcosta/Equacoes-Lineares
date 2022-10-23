@@ -1,11 +1,10 @@
 import copy
+from os import system
 from decimal import *
-import concurrent.futures
-from unicodedata import decimal
 
 MAX_FILES = 13
 
-def ler_arquivo( caminho ):
+def ler_arquivo( caminho ) -> tuple[ list, int ]:
     with open( caminho, "r" ) as arq:
         linhas = arq.readlines()
         
@@ -24,24 +23,30 @@ def ler_arquivo( caminho ):
             linhas[ i ] = linhas[ i ].split( " " )
             
             for j in range( len( linhas[ i ] ) ):
-                linhas[ i ][ j ] = float( linhas[ i ][ j ] )
-            linhas[ i ].append( float( b[ i ] ) )
+                linhas[ i ][ j ] = Decimal( ( linhas[ i ][ j ] ) )
+            linhas[ i ].append( Decimal( ( b[ i ] ) ) )
             
             mat.append( linhas[ i ] )
         
     return mat, n
         
-def mostra_matriz( mat ):
+def mostra_matriz( mat, pos = None ):
+    i = 0
+    
     for linha in mat:
-        print( "|", end="" )
-        
-        for num in linha:
-            if num == 0:
-                num = abs( num ) # Arruma o -0
-                
-            print( f"{ format( num, '.3f' ):^10}", end="" )
+        if i == pos:
+            print( "\033[91m", end="" ) # Destaca a linha do erro com a cor vermelha
             
-        print( "|" )
+        print( "|", end="" )
+        for num in linha:
+            aux = str( num ).split( '.' )
+            if aux[ 0 ] == '-0':
+                num = 0.0
+                
+            print( f"{ format( num, '.3f' ):^13}", end="" )
+            
+        print( "|\033[00m" )            # Volta para a cor normal
+        i += 1
         
     print()
         
@@ -56,110 +61,142 @@ def pivotiza( mat, pos_pivo, m ):
        
     # Verifica da linha do pivo pra frente
     for linha in range( pos_pivo, m ):
-        if abs( mat[ linha ][ pos_pivo ] ) > maior:
-            maior = abs( mat[ linha ][ pos_pivo ] )
+        if mat[ linha ][ pos_pivo ].copy_abs( ) > maior:
+            maior = mat[ linha ][ pos_pivo ].copy_abs( )
             pos_maior = linha
             
     # Faz o swap das linhas
     mat[ pos_pivo ], mat[ pos_maior ] = mat[ pos_maior ], mat[ pos_pivo ]
             
 def gauss_jordan( mat, m ):
-    # Inicialização pra usar a biblioteca Decimal
-    getcontext( )
-    getcontext( ).prec = 50 # Precisão
-    
-    for j in range( m ): # Linha pivo
-        pivotiza( mat, j, m )
-        pivo = mat[ j ][ j ]
+     
+    # Linha pivo
+    for i in range( m ): 
+        pivotiza( mat, i, m )
+        pivo = mat[ i ][ i ]
         
         # Caso ache um erro retorna imdediatamente
+        # Retorna Matriz, solução e posição da linha atual
         if pivo == 0 and mat[ i ][ m ] == 0:
-            return mat, "SPI"    
+            return mat, "SPI", i                                    
         elif pivo == 0 and mat[ i ][ m ] != 0:
-            return mat, "SI"
+            return mat, "SI", i
         
-        mat[ j ] = [ Decimal( x ) / Decimal( pivo ) for x in mat[ j ] ] # Divide a linha toda pelo pivo
-        v = copy.deepcopy( mat[ j ] )
+        mat[ i ] = [ x / pivo for x in mat[ i ] ]  # Divide a linha toda pelo pivo
+        v = copy.deepcopy( mat[ i ] )
         
-        for i in range( m ): # Outras linhas
+        # Outras linhas
+        for j in range( m ): 
             if i != j:
-                a = Decimal( mat[ i ][ j ] ) / Decimal( mat[ j ][ j ] )
+                a = mat[ j ][ i ] / mat[ i ][ i ]
                 
                 for col in range( m + 1 ):
-                    mat[ j ][ col ] = Decimal( mat[ j ][ col ] ) * Decimal( a )                 # Lj <- Lj * aij
-                    mat[ i ][ col ] = Decimal( mat[ i ][ col ] ) - Decimal( mat[ j ][ col ] )   # Li <- Li - Lj
-                    mat[ j ][ col ] = v[ col ]                                                  # Lj <- V
+                    mat[ i ][ col ] *= a                  # Li <- Li * aij
+                    mat[ j ][ col ] -= mat[ i ][ col ]    # Lj <- Lj - Li
+                    mat[ i ][ col ] = v[ col ]            # Li <- V
                 
     # Solução   
     s = []
     for i in range( m ):
         s.append( float( mat[ i ][ m ] ) )
     
-    
-    return mat, s
+    return mat, s, None
 
 # ============
 # GAUSS-SEIDEL
 # ============
 
 def equaciona( mat, x, pos_linha, m ):
-    # Inicialização pra usar a biblioteca Decimal
-    getcontext( )
-    getcontext( ).prec = 50 # Precisão
-    
-    soma = Decimal( 0 )
+    soma = Decimal( '0' )
         
+    # Faz a somatória dos outros x direto em uma variável
     for i in range( m ):        
         if i != pos_linha:
-            soma = Decimal( soma ) + Decimal( mat[ pos_linha ][ i ] ) * Decimal( x[ i ] ) # Faz a somatória dos outros x direto em uma variável
+            soma += mat[ pos_linha ][ i ] * x[ i ]
             
-    return (  Decimal( mat[ pos_linha ][ m ] ) - Decimal( soma ) ) / Decimal( mat[ pos_linha ][ pos_linha ] ) # b - ( tudo menos o x atual ) / x
+    return ( mat[ pos_linha ][ m ] - soma ) / mat[ pos_linha ][ pos_linha ] # b - ( tudo menos o x atual ) / x
 
-def criterio_sassenfeld( mat, m ):
-    # Vetor para empregar os Xi já obtidos
-    # Inicia-se com 1 para não mudar nada na primeira iteração
-    a = [ 1 for i in range( m ) ]
+def troca_pivo( mat, pos, m ) -> None:
+    pivo = mat[ pos ][ pos ]
+    l_pivo = pos
+    c_pivo = pos
     
-    for i in range( m ): # Linhas
-        soma = 0
-        pivotiza( mat, i, m )
-        
-        for j in range( m ): # Colunas
-            if i != j:
-                # Multiplica o absoluto do número pelo seu respectivo X anterior e adiciona na soma
-                soma += abs( mat[ i ][ j ] ) * a[ j ]
+    for l in range( pos, m ):
+        for c in range( pos, m ):
+            if mat[ l ][ c ].copy_abs( ) > pivo.copy_abs( ):
+                pivo = mat[ l ][ c ]
+                l_pivo = l
+                c_pivo = c
+            
+    if l_pivo != pos:
+        mat[ pos ], mat[ l_pivo ] = mat[ l_pivo ], mat[ pos ]
+            
+    if c_pivo != pos:
+        for l in range( m ):
+            mat[ l ][ pos ], mat[ l ][ c_pivo ] = mat[ l ][ c_pivo ], mat[ l ][ pos ]
 
-        a[ i ] = ( soma / abs( mat[ i ][ i ] ) )
+def pivotamento_completo( mat, pos, m ) -> tuple[ str | None, int | None ]:
+    for p in range( pos, m ):
+        troca_pivo( mat, p, m )
         
-        # Caso seja maior ou igual a 1 já é inconclusivo
-        if a[ i ] >= 1:
-            return "Inconclusivo"
+        if mat[ p ][ p ].copy_abs( ) == Decimal( '0' ):
+            if p != m - 1:
+                troca_pivo( mat, p, m )
+            else:
+                return ( "SPI", p ) if mat[ p ][ m ].copy_abs( ) == Decimal( '0' ) else ( "SI", p )
         
-    return "Converge"
+        # Zera números abaixo do pivo
+        v = copy.deepcopy( mat[ p ] )
         
-def gauss_seidel( mat, m, k, e ):
-    x_list = [ 0 for i in range( m ) ]
-    x_ant = copy.deepcopy( x_list )
-    criterio = criterio_sassenfeld( mat, m )
-    
-    # Mostra as equações
-    for i in range( m ):
-        print( f"x{i + 1} = ( {mat[ i ][ m ]} - [ ", end="" ) 
-        
-        for j in range( m ):        
-            if j != i:
-                print( f"( {mat[ j ][ i ]}x{j + 1} ) {'+ ' if i < m - 1 else ''}",end="" )
+        for l in range( p + 1, m ):
+            a = mat[ l ][ p ] / mat[ p ][ p ]
+            
+            for c in range( m + 1 ):
+                mat[ p ][ c ] *= a                # Li <- Li * aij
+                mat[ l ][ c ] -= mat[ p ][ c ]    # Lj <- Lj - Li
+                mat[ p ][ c ] = v[ c ]            # Li <- V
                 
-        print( f") / {mat[ i ][ i ]}" )
+    return None, None
+
+def criterio_sassenfeld( mat, m ) -> str:
+    a = [ Decimal( '1' ) for _ in range( m ) ]
+    maior = 0
+    
+    # Linhas
+    for i in range( m ): 
+        soma = Decimal( '0' )
         
-        # Como divisão por 0 não existe logo o sistema é impossível
-        if mat[ i ][ i ] == 0:
-            return criterio, "SI"
+        # Colunas
+        for j in range( m ):
+            if i != j:                          
+                soma += mat[ i ][ j ].copy_abs( ) * a[ j ]
+
+        a[ i ] = soma / mat[ i ][ i ].copy_abs( )
+        if a[ i ] > maior:
+            maior = a[ i ]
+ 
+    return "Converge" if maior < 1 else "Inconclusivo"
+                   
+def gauss_seidel( mat, m, k, e ) -> tuple[ str | None, list | str, int | None ]:
+    x_list = [ Decimal( '0' ) for _ in range( m ) ]
+    x_ant = copy.deepcopy( x_list )
+    criterio = None
+    erro, linha_erro = pivotamento_completo( mat, 0, m )   
     
-    # Inicialização pra usar a biblioteca Decimal
-    getcontext( )
-    getcontext( ).prec = 50 # Precisão
+    if erro:
+        return None, erro, linha_erro
     
+    mostra_matriz(mat)
+    criterio = criterio_sassenfeld( mat, m )
+     
+    # Mostra a equação do pivo atual
+    for l in range( m ):
+        print( f"x{l + 1} = ( {mat[ l ][ m ]:.10f} - [ ", end="" ) 
+        for c in range( m ):                     
+            if c != l:
+                print( f"( {mat[ l ][ c ]:.10f} x {c + 1} ) {'+ ' if c < m - 1 else ''}", end="" )    
+        print( f") / {mat[ l ][ l ]:.10f}" )
+         
     # Iterações
     for i in range( k ): # K
         print( f"k = {i + 1}" )
@@ -168,52 +205,69 @@ def gauss_seidel( mat, m, k, e ):
         for j in range( m ): # X   
             x = equaciona( mat, x_list, j, m )
             x_list[ j ] = x
-            diferenca = abs( Decimal( x ) - Decimal( x_ant[ j ] ) )
+            diferenca = ( ( x ) - ( x_ant[ j ] ) ).copy_abs( )
             
-            print( f"x{j + 1} = {x} | {diferenca} < e = {e} ", end="" ) 
+            print( f"x{j + 1} = {x:.10f} | {diferenca:.10f} < e = {e} ", end="" ) 
+            print( "( V )" if diferenca < e else "( F )" )
             
             if diferenca < e:
-                print( "( V )\n" )
                 cont -= 1 # Controle para saber se todo X é válido
-            else:
-                print( "( F )\n" )
             
         print( "\n" )
         
         # Se todos X são válidos
         if cont == 0:
             # Retorna os valores com o critério
-            return criterio, [ float( num ) for num in x_list ]
+            return criterio, x_list, linha_erro
         else:
             # Senão copia os valores de X para o vetor de anterior e continua o processo
             x_ant = copy.deepcopy( x_list )
 
     # Caso tenha estourado o K retorna o que tiver
-    return criterio, [ float( num ) for num in x_list ]
+    return criterio, x_list, linha_erro
 
-def main():    
+def main(): 
+    getcontext().prec = 40   
     k = 100
-    e = 0.1
+    e = 0.01
     
-    for i in range( MAX_FILES ):
+    for i in range( 9, 10 ):
         print( f"[!] Arquivo {i}" )
         
-        mat, n = ler_arquivo( f"inputs/{i}.txt" )
-               
-        mat_res, s = gauss_jordan( copy.deepcopy( mat ), n )
+        mat, n = ler_arquivo( f"inputs/{i}.txt" )     
         
         print( "GAUSS-JORDAN" )
-        mostra_matriz( mat_res )
-        print( f"S = {s}\n" )
+        mat_res, solucao, linha = gauss_jordan( copy.deepcopy( mat ), n )
+        mostra_matriz( mat_res, linha )
         
-        print( "-"*200, "\n" )
+        if linha != None:
+            print( f"S = {solucao}" )
+        else:      
+            print( "S = { ", end= "" )
+            for num in solucao:
+                print( f"{num:.10f}, ", end= "")
+            print( "}" )
+        
+        print( "-"* ( 10 * n + 2 ), "\n" )
         
         print( "GAUSS-SEIDEL" )
-        criterio, s = gauss_seidel( copy.copy( mat ), n, k, e )  
-        print( f"[!] Criterio: {criterio}" )      
-        print( f"S = {s}\n" )
+        criterio, solucao, linha = gauss_seidel( mat, n, k, e )  
+        
+        if linha != None:
+            mostra_matriz( mat, linha )
+            print( f"S = {solucao}" )
+        else:
+            print( f"[!] Criterio: {criterio}" )      
+            
+            print( "S = { ", end= "" )
+            for num in solucao:
+                print( f"{num:.10f}, ", end= "")
+            print( "}" )
 
-        print( "="*200, "\n" )
+        print( "="* ( 10 * n + 2 ), "\n" )
+        
+        input()
+        system("cls")
           
 if __name__ == '__main__':
     main()
